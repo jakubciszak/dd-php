@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace DomainDrivers\Tests\Unit\SmartSchedule\Simulation;
 
+use DomainDrivers\SmartSchedule\Shared\Capability\Capability;
+use DomainDrivers\SmartSchedule\Shared\TimeSlot\TimeSlot;
 use DomainDrivers\SmartSchedule\Simulation\AvailableResourceCapability;
-use DomainDrivers\SmartSchedule\Simulation\Capability;
 use DomainDrivers\SmartSchedule\Simulation\SimulatedCapabilities;
-use DomainDrivers\SmartSchedule\Simulation\TimeSlot;
 use Munus\Collection\GenericList;
 use Symfony\Component\Uid\Uuid;
 
@@ -29,7 +29,7 @@ final class AvailableCapabilitiesBuilder
 
     public function withEmployee(Uuid $id): self
     {
-        if ($this->currentResourceId !== null) {
+        if ($this->currentResourceId instanceof Uuid) {
             $this->availabilities = $this->availabilities->append(new AvailableResourceCapability($this->currentResourceId, $this->capability, $this->timeSlot));
         }
         $this->currentResourceId = $id;
@@ -53,7 +53,7 @@ final class AvailableCapabilitiesBuilder
 
     public function build(): SimulatedCapabilities
     {
-        if ($this->currentResourceId !== null) {
+        if ($this->currentResourceId instanceof Uuid) {
             $this->availabilities = $this->availabilities->append(new AvailableResourceCapability($this->currentResourceId, $this->capability, $this->timeSlot));
         }
 

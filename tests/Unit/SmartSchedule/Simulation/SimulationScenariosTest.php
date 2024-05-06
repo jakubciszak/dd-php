@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace DomainDrivers\Tests\Unit\SmartSchedule\Simulation;
 
 use Decimal\Decimal;
+use DomainDrivers\SmartSchedule\Optimization\OptimizationFacade;
+use DomainDrivers\SmartSchedule\Shared\Capability\Capability;
+use DomainDrivers\SmartSchedule\Shared\TimeSlot\TimeSlot;
+use DomainDrivers\SmartSchedule\Simulation\AdditionalPricedCapability;
 use DomainDrivers\SmartSchedule\Simulation\AvailableResourceCapability;
-use DomainDrivers\SmartSchedule\Simulation\Capability;
 use DomainDrivers\SmartSchedule\Simulation\Demand;
 use DomainDrivers\SmartSchedule\Simulation\ProjectId;
 use DomainDrivers\SmartSchedule\Simulation\SimulationFacade;
-use DomainDrivers\SmartSchedule\Simulation\TimeSlot;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -27,6 +29,7 @@ final class SimulationScenariosTest extends TestCase
     private Uuid $leon;
     private SimulationFacade $simulationFacade;
 
+    #[\Override]
     protected function setUp(): void
     {
         $this->jan_1 = TimeSlot::createDailyTimeSlotAtUTC(2021, 1, 1);
@@ -35,9 +38,7 @@ final class SimulationScenariosTest extends TestCase
         $this->project_3 = ProjectId::newOne();
         $this->staszek = Uuid::v7();
         $this->leon = Uuid::v7();
-        $this->simulationFacade = new SimulationFacade();
-
-        self::markTestSkipped('wip');
+        $this->simulationFacade = new SimulationFacade(new OptimizationFacade());
     }
 
     #[Test]
@@ -67,11 +68,11 @@ final class SimulationScenariosTest extends TestCase
             ->build();
 
         // when
-        $result = $this->simulationFacade->whichProjectWithMissingDemandsIsMostProfitableToAllocateResourcesTo($simulatedProjects, $simulatedAvailability);
+        $result = $this->simulationFacade->whatIsTheOptimalSetup($simulatedProjects, $simulatedAvailability);
 
         // then
         self::assertTrue($result->profit->equals(new Decimal(108)));
-        self::assertSame(2, $result->chosenProjects->length());
+        self::assertSame(2, $result->chosenItems->length());
     }
 
     #[Test]
@@ -95,11 +96,11 @@ final class SimulationScenariosTest extends TestCase
             ->build();
 
         // when
-        $result = $this->simulationFacade->whichProjectWithMissingDemandsIsMostProfitableToAllocateResourcesTo($simulatedProjects, $simulatedAvailability);
+        $result = $this->simulationFacade->whatIsTheOptimalSetup($simulatedProjects, $simulatedAvailability);
 
         // then
         self::assertTrue($result->profit->equals(new Decimal(99)));
-        self::assertSame(1, $result->chosenProjects->length());
+        self::assertSame(1, $result->chosenItems->length());
     }
 
     #[Test]
@@ -126,8 +127,8 @@ final class SimulationScenariosTest extends TestCase
         $extraCapability = new AvailableResourceCapability(Uuid::v7(), Capability::skill('YT DRAMA COMMENTS'), $this->jan_1);
 
         // when
-        $resultWithoutExtraResource = $this->simulationFacade->whichProjectWithMissingDemandsIsMostProfitableToAllocateResourcesTo($simulatedProjects, $simulatedAvailability);
-        $resultWithExtraResource = $this->simulationFacade->whichProjectWithMissingDemandsIsMostProfitableToAllocateResourcesTo(
+        $resultWithoutExtraResource = $this->simulationFacade->whatIsTheOptimalSetup($simulatedProjects, $simulatedAvailability);
+        $resultWithExtraResource = $this->simulationFacade->whatIsTheOptimalSetup(
             $simulatedProjects,
             $simulatedAvailability->add($extraCapability)
         );
@@ -135,6 +136,66 @@ final class SimulationScenariosTest extends TestCase
         // then
         self::assertTrue($resultWithoutExtraResource->profit->equals(new Decimal(99)));
         self::assertTrue($resultWithExtraResource->profit->equals(new Decimal(108)));
+    }
+
+    #[Test]
+    public function picksOptimalProjectBasedOnReputation(): void
+    {
+        // given
+        $simulatedProjects = $this->simulatedProjects()
+            ->withProject($this->project_1)
+            ->thatRequires(Demand::for(Capability::skill('PHP-MID'), $this->jan_1))
+            ->thatCanGenerateReputationLoss(100)
+            ->withProject($this->project_2)
+            ->thatRequires(Demand::for(Capability::skill('PHP-MID'), $this->jan_1))
+            ->thatCanGenerateReputationLoss(40)
+            ->build();
+
+        // and there are
+        $simulatedAvailability = $this->simulatedCapabilities()
+            ->withEmployee($this->staszek)
+            ->thatBrings(Capability::skill('PHP-MID'))
+            ->thatIsAvailableAt($this->jan_1)
+            ->build();
+
+        // when
+        $result = $this->simulationFacade->whatIsTheOptimalSetup($simulatedProjects, $simulatedAvailability);
+
+        // then
+        self::assertSame($this->project_1->toString(), $result->chosenItems->get()->name);
+    }
+
+    #[Test]
+    public function checkIfItPaysOffToPayForCapability(): void
+    {
+        // given
+        $simulatedProjects = $this->simulatedProjects()
+            ->withProject($this->project_1)
+            ->thatRequires(Demand::for(Capability::skill('PHP-MID'), $this->jan_1))
+            ->thatCanEarn(new Decimal(100))
+            ->withProject($this->project_2)
+            ->thatRequires(Demand::for(Capability::skill('PHP-MID'), $this->jan_1))
+            ->thatCanEarn(new Decimal(40))
+            ->build();
+
+        // and there are
+        $simulatedAvailability = $this->simulatedCapabilities()
+            ->withEmployee($this->staszek)
+            ->thatBrings(Capability::skill('PHP-MID'))
+            ->thatIsAvailableAt($this->jan_1)
+            ->build();
+
+        // and there are
+        $slawek = new AdditionalPricedCapability(new Decimal(9999), new AvailableResourceCapability(Uuid::v7(), Capability::skill('PHP-MID'), $this->jan_1));
+        $staszek = new AdditionalPricedCapability(new Decimal(3), new AvailableResourceCapability(Uuid::v7(), Capability::skill('PHP-MID'), $this->jan_1));
+
+        // when
+        $buyingSlawek = $this->simulationFacade->profitAfterBuyingNewCapability($simulatedProjects, $simulatedAvailability, $slawek);
+        $buyingStaszek = $this->simulationFacade->profitAfterBuyingNewCapability($simulatedProjects, $simulatedAvailability, $staszek);
+
+        // then
+        self::assertTrue($buyingSlawek->equals(new Decimal(-9959))); // we pay 9999 and get the project for 40
+        self::assertTrue($buyingStaszek->equals(new Decimal(37))); // we pay 3 and get the project for 40
     }
 
     private function simulatedProjects(): SimulatedProjectsBuilder
